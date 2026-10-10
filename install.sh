@@ -395,6 +395,11 @@ cmd_install() {
   if [ ! -f "$CONF" ] && [ "$mode" = machine ]; then
     [ -n "$machine_id" ] && [ -n "$url" ] && [ -n "$key" ] \
       || die "machine mode needs --machine-id, --panel and --token (the command Xboard shows when the machine is added)"
+  elif [ ! -f "$CONF" ] && [ "$type" = local ]; then
+    # No panel: the protocol, port and users are settings on the command line.
+    [ -n "$server_type" ] || die "--type local needs --server-type (socks, shadowsocks, trojan, ...)"
+    printf '%s\n' "${extra[@]:-}" | grep -qi '^port=' || die "--type local needs port=NNNN"
+    printf '%s\n' "${extra[@]:-}" | grep -qi '^users=' || die "--type local needs users=name:secret,name:secret"
   elif [ ! -f "$CONF" ]; then
     [ -n "$node_id" ] && [ -n "$url" ] && [ -n "$key" ] \
       || die "a first install needs --node-id, --panel-url and --panel-key (or V2board's --api-host, --node-id and --api-key)"
@@ -419,6 +424,9 @@ cmd_install() {
         echo "webapi_url=$url"
         echo "machine_id=$machine_id"
         echo "machine_token=$key"
+      elif [ "$type" = local ]; then
+        echo "type=local"
+        echo "server_type=$server_type"
       else
         echo "type=$type"
         [ -z "$server_type" ] || echo "server_type=$server_type"
