@@ -74,7 +74,10 @@ fetch() { # url dest
 }
 
 install_binary() { # [local-file]
+  # The directory and the program must stay world-readable whatever the
+  # umask: the service runs as the kaze user.
   mkdir -p "$(dirname "$BIN")"
+  chmod 755 "$(dirname "$BIN")"
   # In the program's own directory: /tmp may be noexec, and the final move
   # must be a rename on the same filesystem.
   local tmp; tmp=$(mktemp "$(dirname "$BIN")/.kaze.XXXXXX")
@@ -97,9 +100,10 @@ install_binary() { # [local-file]
   "$tmp" -v >/dev/null 2>&1 || { rm -f "$tmp"; die "the binary does not run on this machine"; }
   [ ! -x "$BIN" ] || cp -p "$BIN" "$BIN.prev" # the version being replaced, for kaze rollback
   mv "$tmp" "$BIN"
+  chmod 755 "$BIN"
   echo "installed $("$BIN" -v)"
   # A copy of this script, for rollback and uninstall without the network.
-  curl -fsSL --max-time 60 -o "$LOCAL_SCRIPT.tmp" "$SCRIPT" 2>/dev/null && [ -s "$LOCAL_SCRIPT.tmp" ] && mv "$LOCAL_SCRIPT.tmp" "$LOCAL_SCRIPT" || rm -f "$LOCAL_SCRIPT.tmp"
+  curl -fsSL --max-time 60 -o "$LOCAL_SCRIPT.tmp" "$SCRIPT" 2>/dev/null && [ -s "$LOCAL_SCRIPT.tmp" ] && { mv "$LOCAL_SCRIPT.tmp" "$LOCAL_SCRIPT"; chmod 755 "$LOCAL_SCRIPT"; } || rm -f "$LOCAL_SCRIPT.tmp"
 }
 
 write_ctl() {
@@ -334,6 +338,7 @@ ReadWritePaths=$DIR
 [Install]
 WantedBy=multi-user.target
 UNIT_EOF
+  chmod 644 "$UNIT"
   # Daily update, off until "kaze auto-update on". The random delay spreads a
   # fleet's updates over hours, so a bad release never takes every node at once.
   cat > /etc/systemd/system/kaze-update.service <<UPD_EOF
