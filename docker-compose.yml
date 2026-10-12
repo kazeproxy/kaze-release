@@ -1,0 +1,19 @@
+# One container per protocol. Host networking is what a proxy node wants:
+# no port mapping to maintain and the real client addresses are visible.
+services:
+  kaze-vless:
+    image: ghcr.io/kazeproxy/kaze:latest
+    restart: always
+    network_mode: host
+    environment:
+      type: xboard              # or v2board, v2node, ppanel
+      server_type: vless
+      node_id: "1,2"            # several nodes of the same protocol
+      panel_url: https://panel.example.com
+      panel_key: your-token
+      # license_key: KAZE1.xxxxx.xxxxx     # leave out for the free edition
+      # forbidden_bit_torrent: "true"
+    volumes:
+      - ./data-vless:/etc/kaze  # certificates and geo data live here
+    ulimits:
+      nofile: 1048576
