@@ -309,11 +309,18 @@ case "${1:-}" in
       [[ "$key" =~ ^[a-z0-9_]+$ ]] || { echo "not a setting name: $key" >&2; return 1; }
       # Replace the first line in the common part (before any [node N]
       # section) that sets or comments out this key, else append it there.
+      # A key with another name (panel_url and webapi_url) replaces a line
+      # of that name too, so the file never holds both.
       # The value goes through the environment: awk does not interpret it.
-      K="$key" V="$val" awk 'BEGIN{d=0; sec=0; k=ENVIRON["K"]; v=ENVIRON["V"]}
+      case "$key" in
+        panel_url) alt=webapi_url ;; webapi_url) alt=panel_url ;;
+        panel_key) alt=webapi_key ;; webapi_key) alt=panel_key ;;
+        *) alt= ;;
+      esac
+      K="$key" A="$alt" V="$val" awk 'BEGIN{d=0; sec=0; k=ENVIRON["K"]; a=ENVIRON["A"]; v=ENVIRON["V"]}
         /^[[:space:]]*\[/ { if (!d) { print k "=" v; d=1 } sec=1 }
         { line=$0; sub(/^[#[:space:]]*/, "", line) }
-        !d && !sec && index(line, k "=")==1 { print k "=" v; d=1; next }
+        !d && !sec && (index(line, k "=")==1 || (a != "" && index(line, a "=")==1)) { print k "=" v; d=1; next }
         { print }
         END { if (!d) print k "=" v }' "$CONF" > "$CONF.tmp" && mv "$CONF.tmp" "$CONF"
     done
@@ -442,12 +449,14 @@ cmd_install() {
   # the new one; its licence carries over unless a new one was given.
   if [ -n "$existing" ]; then
     conf_get() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$CONF" | head -n 1; }
+    # The panel's address and key under either name: older files say webapi_*.
+    conf_get2() { local v; v=$(conf_get "$1"); [ -n "$v" ] || v=$(conf_get "$2"); printf '%s' "$v"; }
     local differs=""
     if [ "$mode" = machine ] && [ -n "$machine_id" ] && [ -n "$url" ] && [ -n "$key" ]; then
-      [ "$(conf_get webapi_url)" = "$url" ] && [ "$(conf_get machine_id)" = "$machine_id" ] && [ "$(conf_get machine_token)" = "$key" ] || differs=1
+      [ "$(conf_get2 panel_url webapi_url)" = "$url" ] && [ "$(conf_get machine_id)" = "$machine_id" ] && [ "$(conf_get machine_token)" = "$key" ] || differs=1
     elif [ "$mode" != machine ] && [ "$type" != local ] && [ -n "$node_id" ] && [ -n "$url" ] && [ -n "$key" ] \
       && { [ -n "$server_type" ] || [ "$type" = xboard ] || [ "$type" = v2node ]; }; then
-      [ "$(conf_get webapi_url)" = "$url" ] && [ "$(conf_get node_id)" = "$node_id" ] && [ "$(conf_get webapi_key)" = "$key" ] || differs=1
+      [ "$(conf_get2 panel_url webapi_url)" = "$url" ] && [ "$(conf_get node_id)" = "$node_id" ] && [ "$(conf_get2 panel_key webapi_key)" = "$key" ] || differs=1
     fi
     if [ -n "$differs" ]; then
       [ -n "$license" ] || license=$(conf_get license_key)
@@ -462,7 +471,7 @@ cmd_install() {
       if [ "$mode" = machine ]; then
         # Xboard machine mode: the panel says which nodes this machine runs.
         echo "type=xboard"
-        echo "webapi_url=$url"
+        echo "panel_url=$url"
         echo "machine_id=$machine_id"
         echo "machine_token=$key"
       elif [ "$type" = local ]; then
@@ -472,8 +481,8 @@ cmd_install() {
         echo "type=$type"
         [ -z "$server_type" ] || echo "server_type=$server_type"
         echo "node_id=$node_id"
-        echo "webapi_url=$url"
-        echo "webapi_key=$key"
+        echo "panel_url=$url"
+        echo "panel_key=$key"
       fi
       [ -z "$license" ] || echo "license_key=$license"
       for kv in "${extra[@]:-}"; do [ -z "$kv" ] || echo "$kv"; done
