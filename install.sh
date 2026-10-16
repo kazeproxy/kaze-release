@@ -77,7 +77,7 @@ arch() {
 }
 
 fetch() { # url dest
-  if command -v curl >/dev/null; then curl -fsSL --retry 3 --max-time 600 -o "$2" "$1"
+  if command -v curl >/dev/null; then curl -fsSL --retry 3 --connect-timeout 15 --max-time 600 -o "$2" "$1"
   elif command -v wget >/dev/null; then wget -q --timeout=600 -O "$2" "$1" || { rm -f "$2"; return 1; }
   else die "curl or wget is required"; fi
 }
@@ -111,8 +111,15 @@ install_binary() { # [local-file]
   mv "$tmp" "$BIN"
   chmod 755 "$BIN"
   echo "installed $("$BIN" -v)"
-  # A copy of this script, for rollback and uninstall without the network.
-  curl -fsSL --max-time 60 -o "$LOCAL_SCRIPT.tmp" "$SCRIPT" 2>/dev/null && [ -s "$LOCAL_SCRIPT.tmp" ] && { mv "$LOCAL_SCRIPT.tmp" "$LOCAL_SCRIPT"; chmod 755 "$LOCAL_SCRIPT"; } || rm -f "$LOCAL_SCRIPT.tmp"
+  # A copy of this script, for rollback and uninstall without the network:
+  # this very file when it is one (run as bash install.sh, or by kaze
+  # update), so a machine that cannot reach GitHub does not wait on it;
+  # downloaded only when the script came through a pipe (bash <(curl ...)).
+  if [ -f "$0" ] && head -1 "$0" 2>/dev/null | grep -q '^#!'; then
+    [ "$0" -ef "$LOCAL_SCRIPT" ] || { cp "$0" "$LOCAL_SCRIPT.tmp" && mv "$LOCAL_SCRIPT.tmp" "$LOCAL_SCRIPT" && chmod 755 "$LOCAL_SCRIPT"; } || rm -f "$LOCAL_SCRIPT.tmp"
+  else
+    curl -fsSL --connect-timeout 10 --max-time 60 -o "$LOCAL_SCRIPT.tmp" "$SCRIPT" 2>/dev/null && [ -s "$LOCAL_SCRIPT.tmp" ] && { mv "$LOCAL_SCRIPT.tmp" "$LOCAL_SCRIPT"; chmod 755 "$LOCAL_SCRIPT"; } || rm -f "$LOCAL_SCRIPT.tmp"
+  fi
 }
 
 write_ctl() {
@@ -160,7 +167,7 @@ instances() {
 # uninstall work offline and a failed download never runs an empty script.
 installer() {
   local t; t=$(mktemp)
-  if curl -fsSL --max-time 60 -o "$t" "$SCRIPT" 2>/dev/null && [ -s "$t" ] && head -1 "$t" | grep -q '^#!'; then
+  if curl -fsSL --connect-timeout 10 --max-time 60 -o "$t" "$SCRIPT" 2>/dev/null && [ -s "$t" ] && head -1 "$t" | grep -q '^#!'; then
     bash "$t" "$@"; local rc=$?; rm -f "$t"; return $rc
   fi
   rm -f "$t"
@@ -532,7 +539,7 @@ cmd_install() {
 }
 
 latest_tag() {
-  curl -fsSI --max-time 30 "$RELEASES/releases/latest" 2>/dev/null | tr -d '\r' | sed -n 's#^[Ll]ocation: .*/tag/##p' || true
+  curl -fsSI --connect-timeout 10 --max-time 30 "$RELEASES/releases/latest" 2>/dev/null | tr -d '\r' | sed -n 's#^[Ll]ocation: .*/tag/##p' || true
 }
 
 # running lists the instances that are up: the ones an update restarts.
