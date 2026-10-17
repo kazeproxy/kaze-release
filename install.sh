@@ -286,9 +286,27 @@ menu() {
   done
 }
 
+# hop_caps gives the service CAP_NET_ADMIN while this node may set up port
+# hopping (hop_ports set, or a Hysteria 2 or TUIC node, whose range the
+# panel can send), and takes it away otherwise: the installer's hop_dropin.
+hop_caps() {
+  local d=/etc/systemd/system/$SVC.service.d f
+  f=$d/hop.conf
+  if grep -Eiq '^[[:space:]]*(hop_ports[[:space:]]*=[[:space:]]*[^[:space:]#]|server_type[[:space:]]*=[[:space:]]*(hysteria|hysteria2|tuic)([[:space:]#]|$))' "$CONF" 2>/dev/null; then
+    [ -f "$f" ] && return 0
+    mkdir -p "$d"
+    printf '# Written by kaze: this node may set up port hopping, whose forward rules need it.\n[Service]\nAmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN\n' > "$f.tmp" && mv "$f.tmp" "$f"
+  else
+    [ -f "$f" ] || return 0
+    rm -f "$f"
+  fi
+  systemctl daemon-reload
+}
+
 run() {
 case "${1:-}" in
-  start|stop|restart|status) systemctl "$1" "$SVC" ;;
+  start|restart) hop_caps; systemctl "$1" "$SVC" ;;
+  stop|status) systemctl "$1" "$SVC" ;;
   enable|disable)            systemctl "$1" "$SVC" ;;
   log)     journalctl -u "$SVC" -n "${2:-100}" --no-pager ;;
   follow)  journalctl -u "$SVC" -f ;;
@@ -340,6 +358,7 @@ case "${1:-}" in
         rm -f "$tmp"; return 1
       fi
     done
+    hop_caps
     echo "saved; apply with: kaze${NAME:+ -n $NAME} restart" ;;
   menu|"")
     if [ -t 0 ]; then menu; else usage; fi ;;
@@ -352,6 +371,22 @@ CTL_EOF
   chmod 755 "$CTL.tmp"
   mv "$CTL.tmp" "$CTL"
   ln -sf "$CTL" "$CTL_ALIAS"
+}
+
+# hop_dropin grants the unit CAP_NET_ADMIN where port hopping may be set
+# up: kaze.conf sets hop_ports, or the node is Hysteria 2 or TUIC, whose
+# range the panel can send (PPanel does). The forward rules are nftables
+# rules; a node that forwards no ports has no business with the host's
+# firewall, so the others go without. The same test is in kz (hop_caps).
+hop_dropin() {
+  local d="$UNIT.d" f="$UNIT.d/hop.conf"
+  if [ -f "$CONF" ] && grep -Eiq '^[[:space:]]*(hop_ports[[:space:]]*=[[:space:]]*[^[:space:]#]|server_type[[:space:]]*=[[:space:]]*(hysteria|hysteria2|tuic)([[:space:]#]|$))' "$CONF"; then
+    mkdir -p "$d"
+    printf '# Written by kaze: this node may set up port hopping, whose forward rules need it.\n[Service]\nAmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN\n' > "$f.tmp" && mv "$f.tmp" "$f"
+  else
+    rm -f "$f"
+  fi
+  systemctl daemon-reload 2>/dev/null || true
 }
 
 write_unit() {
@@ -368,9 +403,10 @@ ExecStart=$BIN -c $CONF
 Restart=always
 RestartSec=3
 LimitNOFILE=1048576
-# Listening below port 1024, and setting up the port-hopping forward rules,
-# without running as root.
-AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN
+# Listening below port 1024 without running as root. The port-hopping
+# forward rules need CAP_NET_ADMIN too, which a drop-in beside this unit
+# grants only to a node that may set them up (see hop_dropin).
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 NoNewPrivileges=true
 ProtectSystem=full
 ProtectHome=true
@@ -379,6 +415,7 @@ ReadWritePaths=$DIR
 [Install]
 WantedBy=multi-user.target
 UNIT_EOF
+  hop_dropin
   chmod 644 "$UNIT"
   # Daily update, off until "kaze auto-update on". The random delay spreads a
   # fleet's updates over hours, so a bad release never takes every node at once.
