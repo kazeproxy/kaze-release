@@ -294,7 +294,7 @@ case "${1:-}" in
   follow)  journalctl -u "$SVC" -f ;;
   check)   as_kaze /usr/local/kaze/kaze -c "$CONF" -check ;;
   license) as_kaze /usr/local/kaze/kaze -c "$CONF" -license ;; # as the service user: its lease files stay its own
-  geo)     /usr/local/kaze/kaze -c "$CONF" -update-geo && chown kaze:kaze "$DIR"/*.dat ;;
+  geo)     as_kaze /usr/local/kaze/kaze -c "$CONF" -update-geo ;; # as the service user: it writes the files, and root follows no link of its
   instances) instances | sed 's/^kaze$/kaze（默认实例，\/etc\/kaze）/; s/^kaze-\(.*\)$/\1（kaze -n \1，\/etc\/kaze-\1）/' ;;
   add)     add ;;
   version) /usr/local/kaze/kaze -v ;;
@@ -324,14 +324,22 @@ case "${1:-}" in
         panel_key) alt=webapi_key ;; webapi_key) alt=panel_key ;;
         *) alt= ;;
       esac
-      K="$key" A="$alt" V="$val" awk 'BEGIN{d=0; sec=0; k=ENVIRON["K"]; a=ENVIRON["A"]; v=ENVIRON["V"]}
+      # The new file is written where only root writes (/etc, not the
+      # service user's directory) and moved into place: a link the service
+      # user planted at the file's name would otherwise be followed by root.
+      case "$val" in *$'\n'*) echo "a value cannot contain a line break" >&2; return 1 ;; esac
+      tmp=$(mktemp /etc/.kaze.conf.XXXXXX) || return 1
+      if K="$key" A="$alt" V="$val" awk 'BEGIN{d=0; sec=0; k=ENVIRON["K"]; a=ENVIRON["A"]; v=ENVIRON["V"]}
         /^[[:space:]]*\[/ { if (!d) { print k "=" v; d=1 } sec=1 }
         { line=$0; sub(/^[#[:space:]]*/, "", line) }
         !d && !sec && (index(line, k "=")==1 || (a != "" && index(line, a "=")==1)) { print k "=" v; d=1; next }
         { print }
-        END { if (!d) print k "=" v }' "$CONF" > "$CONF.tmp" && mv "$CONF.tmp" "$CONF"
+        END { if (!d) print k "=" v }' "$CONF" > "$tmp"; then
+        chown kaze:kaze "$tmp" && chmod 600 "$tmp" && mv -fT "$tmp" "$CONF" || { rm -f "$tmp"; return 1; }
+      else
+        rm -f "$tmp"; return 1
+      fi
     done
-    chown kaze:kaze "$CONF"; chmod 600 "$CONF"
     echo "saved; apply with: kaze${NAME:+ -n $NAME} restart" ;;
   menu|"")
     if [ -t 0 ]; then menu; else usage; fi ;;
